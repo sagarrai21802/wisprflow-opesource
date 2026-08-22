@@ -6,13 +6,13 @@ struct ContentView: View {
     @ObservedObject var audioRecorder = AudioRecorder.shared
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             // Header
             HStack {
-                Image(systemName: "waveform.circle.fill")
-                    .font(.title)
+                Image(systemName: "sparkles.tv.fill")
+                    .font(.title2)
                     .foregroundColor(.purple)
-                Text("Wispr Direct Audio Test Panel")
+                Text("Wispr Context-Aware AI Test Dashboard")
                     .font(.headline)
                 Spacer()
             }
@@ -22,7 +22,7 @@ struct ContentView: View {
                 Button(action: toggleRecord) {
                     HStack {
                         Image(systemName: audioRecorder.isRecording ? "stop.fill" : "mic.fill")
-                        Text(audioRecorder.isRecording ? "Stop Recording" : "Record Mic")
+                        Text(audioRecorder.isRecording ? "Stop Dictating" : "Hold Right Option / Click Mic")
                     }
                     .font(.system(size: 13, weight: .bold))
                     .padding(.horizontal, 16)
@@ -35,7 +35,7 @@ struct ContentView: View {
                 
                 if let url = pipeline.recordedURL, !audioRecorder.isRecording {
                     Button(action: {
-                        Task { await pipeline.processAudio(url: url) }
+                        Task { await pipeline.processAudioPipeline(url: url) }
                     }) {
                         HStack {
                             if pipeline.isProcessing {
@@ -44,7 +44,7 @@ struct ContentView: View {
                             } else {
                                 Image(systemName: "paperplane.fill")
                             }
-                            Text("Send to Groq Whisper")
+                            Text("Re-Run AI Pipeline")
                         }
                         .font(.system(size: 13, weight: .bold))
                         .padding(.horizontal, 16)
@@ -65,6 +65,27 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
             }
             
+            // App Context Banner
+            if let ctx = pipeline.activeContext, let appName = ctx.appName {
+                HStack(spacing: 6) {
+                    Image(systemName: "app.badge.checkmark.fill")
+                        .foregroundColor(.blue)
+                    Text("Captured App:")
+                        .bold()
+                    Text(appName)
+                    if let title = ctx.windowTitle {
+                        Text("• \(title)")
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .font(.caption)
+                .padding(8)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(6)
+            }
+            
             // Live Wave Level Meter
             if audioRecorder.isRecording {
                 HStack(spacing: 4) {
@@ -74,20 +95,26 @@ struct ContentView: View {
                             .frame(width: 4, height: max(6, CGFloat(audioRecorder.audioLevel) * 45.0 * CGFloat.random(in: 0.6...1.2)))
                     }
                 }
-                .frame(height: 50)
-                .padding(.vertical, 4)
+                .frame(height: 40)
+                .padding(.vertical, 2)
             }
             
-            // Transcribed Text Result Box
+            // Gemini AI Result Box
             if !pipeline.transcribedText.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("GROQ WHISPER RESPONSE:")
-                        .font(.caption)
-                        .bold()
-                        .foregroundColor(.green)
+                    HStack {
+                        Text("GEMINI CONTEXT-AWARE GENERATED OUTPUT:")
+                            .font(.caption)
+                            .bold()
+                            .foregroundColor(.green)
+                        Spacer()
+                        Text("Auto-Pasted at Caret")
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                    }
                     
                     Text("\"\(pipeline.transcribedText)\"")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.primary)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -125,7 +152,7 @@ struct ContentView: View {
             }
         }
         .padding(20)
-        .frame(width: 520, height: 420)
+        .frame(width: 540, height: 450)
         .onAppear {
             pipeline.setupPipeline()
         }
@@ -141,8 +168,8 @@ struct ContentView: View {
     
     private func logColor(_ log: String) -> Color {
         if log.contains("❌") { return .red }
-        if log.contains("✅") || log.contains("🎉") || log.contains("🎯") { return .green }
-        if log.contains("🔴") || log.contains("🛑") { return .yellow }
+        if log.contains("✅") || log.contains("🎉") || log.contains("🎯") || log.contains("🤖") { return .green }
+        if log.contains("🔴") || log.contains("🛑") || log.contains("✨") || log.contains("🛫") { return .yellow }
         return .primary
     }
 }

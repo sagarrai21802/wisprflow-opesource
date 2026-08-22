@@ -19,14 +19,15 @@ struct GeminiService {
         }
     }
     
-    /// Cleans up, formats, and refines transcribed text using Gemini.
-    func processAndRefineText(_ rawText: String) async throws -> String {
+    /// Context-aware AI processing method that analyzes voice instruction + application context
+    func processWithContext(rawTranscript: String, context: AppContextSnapshot) async throws -> String {
         let apiKey = Config.shared.geminiApiKey.isEmpty ? Config.shared.geminiApiKeySecond : Config.shared.geminiApiKey
         guard !apiKey.isEmpty else {
             throw ServiceError.missingApiKey
         }
         
-        guard !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let trimmedRawText = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRawText.isEmpty else {
             return ""
         }
         
@@ -36,22 +37,34 @@ struct GeminiService {
         }
         
         let systemPrompt = """
-        You are an intelligent voice dictation post-processor.
-        Your task is to fix grammar, remove speech hesitations (like "um", "uh", "er"), format numbers/punctuation properly, and return ONLY the final refined text.
-        Do NOT add any preamble, explanation, quotes, or conversational filler. Return strictly the polished text.
+        You are an intelligent, context-aware Voice Assistant and AI dictation processor.
+        You receive:
+        1. User's spoken voice command/transcript.
+        2. Context about the active application (App Name, Window Title, and any Selected/On-Screen Text).
+
+        INSTRUCTIONS:
+        - Analyze the user's spoken voice transcript in relation to the active app and window context.
+        - If the user asks to write/reply/generate an email, document, response, code, or message based on the context (e.g. "write a mail for the reply of this mail..."), generate the complete, high-quality, professional text output requested.
+        - If the user is dictating standard text, refine the grammar and remove speech hesitations ("um", "uh") while preserving the user's intent.
+        - Output ONLY the final generated content ready to be pasted directly into the user's application caret.
+        - Do NOT include any meta-commentary, introductory remarks (e.g., "Here is your email:"), preambles, or markdown quote blocks. Return strictly the final text to be pasted.
         """
+        
+        var userPromptContent = "APPLICATION CONTEXT:\n"
+        userPromptContent += context.summary
+        userPromptContent += "\n\nSPOKEN VOICE COMMAND / TRANSCRIPT:\n\(trimmedRawText)"
         
         let payload: [String: Any] = [
             "contents": [
                 [
                     "role": "user",
                     "parts": [
-                        ["text": "\(systemPrompt)\n\nInput Speech Text:\n\(rawText)"]
+                        ["text": "\(systemPrompt)\n\n\(userPromptContent)"]
                     ]
                 ]
             ],
             "generationConfig": [
-                "temperature": 0.2,
+                "temperature": 0.3,
                 "maxOutputTokens": 2048
             ]
         ]
@@ -68,7 +81,6 @@ struct GeminiService {
             throw ServiceError.requestFailed("HTTP Status Code: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         }
         
-        // Parse Gemini JSON response
         struct GeminiResponse: Decodable {
             struct Candidate: Decodable {
                 struct Content: Decodable {
@@ -90,7 +102,13 @@ struct GeminiService {
         }
         
         let outputText = firstTextPart.trimmingCharacters(in: .whitespacesAndNewlines)
-        print("[Gemini] Refined Output: \(outputText)")
+        print("[Gemini] Context-Aware Generated Output:\n\(outputText)")
         return outputText
+    }
+    
+    /// Legacy fallback method for raw text processing
+    func processAndRefineText(_ rawText: String) async throws -> String {
+        let dummyContext = AppContextSnapshot(appName: nil, bundleIdentifier: nil, windowTitle: nil, selectedText: nil)
+        return try await processWithContext(rawTranscript: rawText, context: dummyContext)
     }
 }

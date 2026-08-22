@@ -8,6 +8,8 @@ final class WisprPipelineManager: ObservableObject {
     
     @Published var logs: [String] = []
     @Published var transcribedText: String = ""
+    @Published var rawWhisperText: String = ""
+    @Published var activeContext: AppContextSnapshot?
     @Published var isProcessing: Bool = false
     @Published var recordedURL: URL?
     
@@ -48,11 +50,21 @@ final class WisprPipelineManager: ObservableObject {
     
     func startRecording() {
         guard !AudioRecorder.shared.isRecording && !isProcessing else { return }
+        
+        // Capture Application Context at press time before focus shifts
+        let snapshot = AppContextCollector.shared.collectSnapshot()
+        self.activeContext = snapshot
+        
+        if let app = snapshot.appName {
+            addLog("📱 Active App Captured: \(app)\(snapshot.windowTitle != nil ? " (\(snapshot.windowTitle!))" : "")")
+        }
+        
         do {
             let url = try AudioRecorder.shared.startRecording()
             self.recordedURL = url
             self.transcribedText = ""
-            addLog("🔴 Right Option / Button pressed -> Recording started via AVCaptureSession... Speak now!")
+            self.rawWhisperText = ""
+            addLog("🔴 Right Option / Button pressed -> Recording started... Speak now!")
         } catch {
             addLog("❌ Failed to start recording: \(error.localizedDescription)")
         }
@@ -69,43 +81,61 @@ final class WisprPipelineManager: ObservableObject {
         self.recordedURL = fileURL
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
         addLog("🛑 Recording stopped. WAV file size: \(fileSize) bytes (\(fileSize / 1024) KB)")
-        addLog("💾 Saved debug audio copy to /Users/apple/Desktop/new/wispr/debug_recording.wav")
         
-        // Automatically send to Groq Whisper and paste at cursor
+        // Process Pipeline: Groq STT -> Gemini Contextual AI -> Caret Paste
         Task {
-            await processAudio(url: fileURL)
+            await processAudioPipeline(url: fileURL)
         }
     }
     
-    func processAudio(url: URL) async {
+    func processAudioPipeline(url: URL) async {
         guard !isProcessing else { return }
         isProcessing = true
         
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-        addLog("🛫 Sending HTTP POST to Groq Whisper API (\(fileSize) bytes)...")
+        addLog("🛫 Step 1: Transcribing audio via Groq Whisper API (\(fileSize / 1024) KB)...")
         
         let startTime = Date()
         
         do {
-            let result = try await GroqService.shared.transcribeAudio(fileURL: url)
-            let duration = String(format: "%.2f", Date().timeIntervalSince(startTime))
+            // Step 1: Sub-Second Speech-To-Text via Groq Whisper (whisper-large-v3)
+            let rawWhisperResult = try await GroqService.shared.transcribeAudio(fileURL: url)
+            let groqDuration = String(format: "%.2f", Date().timeIntervalSince(startTime))
             
-            if result.isEmpty {
+            guard !rawWhisperResult.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 addLog("⚠️ Groq returned EMPTY transcript (filtered silence/noise).")
                 self.transcribedText = "[No Speech Detected]"
-            } else {
-                addLog("🎉 ✅ SUCCESS in \(duration)s!")
-                addLog("📝 Output: \"\(result)\"")
-                self.transcribedText = result
-                
-                // Auto-paste text directly at active cursor (FreeFlow exact behavior)
-                addLog("🎯 Pasting text directly at active cursor via Cmd+V...")
-                CaretManager.shared.pasteTextAtCaret(result)
-                addLog("✅ Pasted at cursor location!")
+                self.isProcessing = false
+                return
             }
+            
+            self.rawWhisperText = rawWhisperResult
+            addLog("🎉 ✅ Groq Whisper STT in \(groqDuration)s: \"\(rawWhisperResult)\"")
+            
+            // Step 2: Context-Aware Intelligence via Gemini AI (gemini-2.5-flash)
+            let geminiStartTime = Date()
+            let snapshot = self.activeContext ?? AppContextCollector.shared.collectSnapshot()
+            addLog("✨ Step 2: Processing transcript + App Context (\(snapshot.appName ?? "General")) via Gemini AI...")
+            
+            let finalGeneratedText = try await GeminiService.shared.processWithContext(
+                rawTranscript: rawWhisperResult,
+                context: snapshot
+            )
+            
+            let geminiDuration = String(format: "%.2f", Date().timeIntervalSince(geminiStartTime))
+            addLog("🤖 ✅ Gemini AI Generated in \(geminiDuration)s:")
+            addLog("📝 Output: \"\(finalGeneratedText)\"")
+            
+            self.transcribedText = finalGeneratedText
+            
+            // Step 3: Direct Caret Pasting via Command+V Keystroke Injection
+            addLog("🎯 Step 3: Pasting generated text directly at active cursor via Cmd+V...")
+            CaretManager.shared.pasteTextAtCaret(finalGeneratedText)
+            addLog("✅ Pasted at cursor location!")
+            
         } catch {
-            let duration = String(format: "%.2f", Date().timeIntervalSince(startTime))
-            addLog("❌ ERROR after \(duration)s: \(error.localizedDescription)")
+            let totalDuration = String(format: "%.2f", Date().timeIntervalSince(startTime))
+            addLog("❌ ERROR after \(totalDuration)s: \(error.localizedDescription)")
         }
         
         isProcessing = false
@@ -114,6 +144,8 @@ final class WisprPipelineManager: ObservableObject {
     func clearLogs() {
         logs.removeAll()
         transcribedText = ""
+        rawWhisperText = ""
+        activeContext = nil
     }
     
     private func handleRightOptionPressed() {
