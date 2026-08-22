@@ -28,6 +28,16 @@ final class AppContextCollector {
     
     private init() {}
     
+    /// Asynchronously captures application context on a background queue to ensure ZERO main thread blocking
+    func collectSnapshotAsync() async -> AppContextSnapshot {
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let snapshot = self.collectSnapshot()
+                continuation.resume(returning: snapshot)
+            }
+        }
+    }
+    
     /// Captures the current frontmost application, window title, and selected text/context
     func collectSnapshot() -> AppContextSnapshot {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
@@ -86,7 +96,6 @@ final class AppContextCollector {
         if valResult == .success, let text = valValue as? String {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
-                // Truncate fallback to max 500 chars to avoid prompt bloat
                 return String(trimmed.prefix(500))
             }
         }

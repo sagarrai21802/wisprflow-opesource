@@ -51,12 +51,15 @@ final class WisprPipelineManager: ObservableObject {
     func startRecording() {
         guard !AudioRecorder.shared.isRecording && !isProcessing else { return }
         
-        // Capture Application Context at press time before focus shifts
-        let snapshot = AppContextCollector.shared.collectSnapshot()
-        self.activeContext = snapshot
-        
-        if let app = snapshot.appName {
-            addLog("📱 Active App Captured: \(app)\(snapshot.windowTitle != nil ? " (\(snapshot.windowTitle!))" : "")")
+        // Capture Application Context asynchronously on background thread (zero main thread lag)
+        Task.detached(priority: .userInitiated) {
+            let snapshot = await AppContextCollector.shared.collectSnapshotAsync()
+            await MainActor.run {
+                WisprPipelineManager.shared.activeContext = snapshot
+                if let app = snapshot.appName {
+                    WisprPipelineManager.shared.addLog("📱 Active App Captured: \(app)\(snapshot.windowTitle != nil ? " (\(snapshot.windowTitle!))" : "")")
+                }
+            }
         }
         
         do {
