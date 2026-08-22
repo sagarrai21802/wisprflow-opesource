@@ -1,0 +1,18 @@
+# FreeFlow local clone reference
+freeflow/
+
+# Audio debug recording
+debug_recording.wav
+
+# Environment configuration with API keys
+.env
+
+# macOS system files
+.DS_Store
+
+# Xcode Derived Data & User Data
+build/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+DerivedData/
+*.moved-aside
